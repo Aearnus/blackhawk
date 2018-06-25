@@ -1,16 +1,19 @@
 require "blackhawk/version"
 
-module Blackhawk
+#module Blackhawk
   # Your code goes here...
-end
+#end
 
 class Blackhawk
     def path
-        "/proc/#{@pid}"
+        File.join "/proc", "#{@pid}"
     end
-    def new(pid)
+    def maps
+        Dir["#{File.join self.path, "map_files", "*"}"]
+    end
+    
+    def initialize(pid)
         raise PermissionError.new("Blackhawk requires superuser permissions") unless Process.uid == 0
         @pid = pid
-
     end
 end

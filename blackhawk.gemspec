@@ -9,9 +9,9 @@ Gem::Specification.new do |spec|
   spec.authors       = ["Aearnus"]
   spec.email         = ["tslimkemann42@gmail.com"]
 
-  spec.summary       = %q{TODO: Write a short summary, because RubyGems requires one.}
-  spec.description   = %q{TODO: Write a longer description or delete this line.}
-  spec.homepage      = "TODO: Put your gem's website or public repo URL here."
+  spec.summary       = %q{Memory manipulation from inside of Ruby}
+  spec.description   = %q{A RubyGem that provides an interface for live or programmatic memory watching and manipulation of other processes.}
+  spec.homepage      = "https://github.com/aearnus/blackhawk"
   spec.license       = "MIT"
 
   # Prevent pushing this gem to RubyGems.org. To allow pushes either set the 'allowed_push_host'

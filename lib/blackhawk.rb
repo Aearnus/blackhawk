@@ -9,6 +9,11 @@ module Blackhawk
     end
     
     class MemoryLens
+        def read
+        end
+        
+        def initialize(range)
+        end
     end
     
     class Blackhawk

@@ -2,7 +2,7 @@ require "blackhawk/version"
 
 module Blackhawk
     class MemoryMatch
-        attr_accessor(
+        attr_reader(
             :range,
             :match
         )
@@ -27,10 +27,53 @@ module Blackhawk
     end
     
     class MemoryLens
-        def read
+        attr_reader(
+            :loaded_page_range,
+            :loaded_page_files,
+            :range
+        )
+        
+        # Peer through the MemoryLens and look at the memory it's watching.
+        #
+        # @raise [NoMemoryError] if more than 2 map files are loaded. this is TODO to fix
+        # @return [Array<Fixnum>] the memory that the MemoryLens is looking at.
+        def look
+            # take the easier path if there's only one page file to load
+            if @loaded_page_files.length == 1
+                offset = @range[0] - @loaded_page_range[0]
+                length = @range[1] - @range[0]
+                return @loaded_page_files[0].pread(length, offset).bytes
+            # else take the harder path
+            elsif @loaded_page_files.length == 2
+                offset = @range[0] - @loaded_page_range[0]
+                length = @range[1] - @range[0]
+                return (@loaded_page_files[0].pread(99999999, offset).bytes << @loaded_page_files[1].read(length - (@loaded_page_range[0][1] - @range[0])))
+            else
+                raise NoMemoryError.new("MemoryLens cannot currently look at more than 2 map files. Please contact the developer if you actually ran into this in real code and not just a test case.")
+            end
         end
         
-        def initialize(range)
+        # Creates an instance of the MemoryLens class.
+        #
+        # @param blackhawk [Blackhawk] the blackhawk instance attached to the process.
+        # @param range [Array(Fixnum, Fixnum)] the memory range to watch on this object.
+        # @raise [RangeError] if the range is outside of the range of the process's memory.
+        # @return [MemoryLens] an instance of the MemoryLens class.
+        def initialize(blackhawk, range)
+            range.sort!
+            map_ranges_memo = blackhawk.map_ranges
+            raise RangeError.new("MemoryLens range underflow") if range[0] < map_ranges_memo[0][0] 
+            raise RangeError.new("MemoryLens range overflow") if range[1] < map_ranges_memo[-1][1] 
+            
+            # reject every map range that's completely below or completely above the wanted range
+            ranges_to_load = map_ranges_memo.
+                reject { |map_range| map_range[1] < range[0] }.
+                reject { |map_range| map_range[0] > range[1] }
+            
+            @loaded_page_range = [ranges_to_load[0][0], ranges_to_load[-1][1]]    
+            
+            @loaded_page_files = ranges_to_load.
+                map { |range_to_load| Kernel.open(blackhawk.map_range_to_map_path(range_to_load), "rb") }
         end
     end
     
@@ -54,12 +97,17 @@ module Blackhawk
                 scan(/[0-9a-f]+/i).
                 map { |range| range.to_i 16 }
         end
+        def map_range_to_map_path(map_range)
+            File.join self.path, "map_files", "#{map_range[0]-map_range[1]}"
+        end
         
         # @return [Array<Array(Fixnum,Fixnum)>] a list of memory address ranges of the attached process for which map files exist
+        # @note this is guaranteed to be in order
         def map_ranges
             self.
                 map_paths.
-                map { |map_path| map_path_to_map_range(map_path) }
+                map { |map_path| map_path_to_map_range(map_path) }.
+                sort_by { |range| range[0] }
         end
         
         # @!endgroup
@@ -183,6 +231,7 @@ module Blackhawk
         # @param match [MemoryMatch] the successful memory match.
         # @return [MemoryLens] an object used to watch that area of memory.
         def watch_match(match)
+            return MemoryLens.new(match.range)
         end
         
         # Allows the user to watch an area of memory.
@@ -191,6 +240,7 @@ module Blackhawk
         # @raise [IOError] the range of memory to watch is outside of the bounds of the attached process's mapped memory.
         # @return [MemoryLens] an object used to watch that area of memory.
         def watch_range(range)
+            return MemoryLens.new(match.range)
         end
         
         # @!endgroup

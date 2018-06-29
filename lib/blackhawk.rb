@@ -85,8 +85,8 @@ module Blackhawk
         # @return [Array<MemoryMatch>] if a match was found.
         def search_yield(length, range: nil, verbose: false, debug: false)
             verbose = true if debug
-            raise NoMemoryError.new("Can't search for a byte list larger than the 1MB page size") if list.length > (1024 * 1024)
-            raise RangeError.new("Byte out of range") if list.any? { |byte| (byte < 0) || (byte > 255) }
+            raise NoMemoryError.new("Can't search for a byte list larger than the 1MB page size") if length > (1024 * 1024)
+            #raise RangeError.new("Byte out of range") if list.any? { |byte| (byte < 0) || (byte > 255) }
             
             map_paths_memo = self.map_paths
             out = []
@@ -105,7 +105,7 @@ module Blackhawk
                     previous_map_bytestring = "" 
                 else 
                     previous_map_file = Kernel.open(map_paths_memo[map_index - 1], "rb")
-                    previous_map_file.seek(-list.length, IO::SEEK_END)
+                    previous_map_file.seek(-length, IO::SEEK_END)
                     previous_map_bytestring = previous_map_file.read
                     previous_map_file.close
                 end
@@ -114,7 +114,7 @@ module Blackhawk
                     next_map_bytestring = ""
                 else
                     next_map_file = Kernel.open(map_paths_memo[map_index + 1], "rb")
-                    next_map_bytestring = next_map_file.read list.length
+                    next_map_bytestring = next_map_file.read length
                     next_map_file.close
                 end
                 
@@ -131,18 +131,16 @@ module Blackhawk
                 end
                 
                 # finally, search the memory
-                map_bytestring_overhang.bytes.each_cons(list.length).with_index do |byte_list, overhang_offset|
-                    offset = map_range.first + (overhang_offset - list.length)
+                map_bytestring_overhang.bytes.each_cons(length).with_index do |byte_list, overhang_offset|
+                    offset = map_range.first + (overhang_offset - length)
                     if (yield byte_list)
                         puts "FOUND A MATCH @ #{offset.to_s 16}"
-                        out << MemoryMatch.new([offset, offset + list.length], list)
+                        out << MemoryMatch.new([offset, offset + length], byte_list)
                     end
                 end
             end
             return out
         end
-        
-
         
         # Searches the entire memory for a specified list of bytes.
         #
@@ -156,62 +154,11 @@ module Blackhawk
         # @return [nil] if no match was found.
         # @return [Array<MemoryMatch>] if a match was found.
         def search_byte_list(list, range: nil, verbose: false, debug: false)
-            verbose = true if debug
             raise NoMemoryError.new("Can't search for a byte list larger than the 1MB page size") if list.length > (1024 * 1024)
             raise RangeError.new("Byte out of range") if list.any? { |byte| (byte < 0) || (byte > 255) }
-            
-            map_paths_memo = self.map_paths
-            out = []
-            
-            map_paths_memo.each_with_index do |map_path, map_index|
-                map_range = map_path_to_map_range map_path
-                
-                if verbose
-                    puts "Searching map #{map_range.first.to_s 16} - #{map_range.last.to_s 16} [#{(100 * map_index.to_f / map_paths_memo.length.to_f).round 1}%]..."
-                end
-                
-                map_bytestring = IO.binread(map_path)
-                
-                if map_index == 0
-                    previous_map_file = nil
-                    previous_map_bytestring = "" 
-                else 
-                    previous_map_file = Kernel.open(map_paths_memo[map_index - 1], "rb")
-                    previous_map_file.seek(-list.length, IO::SEEK_END)
-                    previous_map_bytestring = previous_map_file.read
-                    previous_map_file.close
-                end
-                if map_index == map_paths_memo.length - 1
-                    next_map_file = nil
-                    next_map_bytestring = ""
-                else
-                    next_map_file = Kernel.open(map_paths_memo[map_index + 1], "rb")
-                    next_map_bytestring = next_map_file.read list.length
-                    next_map_file.close
-                end
-                
-                # this string is key. this is the string we're going to search for to find the
-                # provided byte list
-                map_bytestring_overhang = 
-                    previous_map_bytestring +
-                    map_bytestring +
-                    next_map_bytestring
-                if debug
-                    puts "    PREVIOUS_MAP: #{previous_map_bytestring.encoding} #{previous_map_bytestring.length}"
-                    puts "    MAP_BYTESTRING: #{map_bytestring_overhang.encoding} #{map_bytestring_overhang.length}"
-                    puts "    NEXT_MAP: #{next_map_bytestring.encoding} #{next_map_bytestring.length}"
-                end
-                
-                # finally, search the memory
-                map_bytestring_overhang.bytes.each_cons(list.length).with_index do |byte_list, overhang_offset|
-                    offset = map_range.first + (overhang_offset - list.length)
-                    if list == byte_list
-                        puts "FOUND A MATCH @ #{offset.to_s 16}"
-                        out << MemoryMatch.new([offset, offset + list.length], list)
-                    end
-                end
-            end
-            return out
+            return self.search_yield(list.length, range: range, verbose: verbose, debug: debug) { |byte_list| 
+                byte_list == list
+            }
         end
         
         # Searches the entire memory for a specified string.
@@ -221,10 +168,14 @@ module Blackhawk
         # @param encoding [Encoding] the string encoding to use in the search, defaulting to `Encoding::ASCII_8BIT`.
         # @param verbose [Boolean] whether or not to print out progress.
         # @param debug [Boolean] whether or not to print debug information.
+        # @raise [NoMemoryError] if the string is larger than 1MB.
         # @return [nil] if no match was found.
         # @return [Array<MemoryMatch>] if a match was found.
         def search_string(string, range: nil, encoding: Encoding::ASCII_8BIT, verbose: false, debug: false)
-            search_byte_list(string.encode(encoding).bytes, verbose: verbose, debug: debug)
+            list = string.encode(encoding).bytes
+            return self.search_yield(list, range: range, verbose: verbose, debug: debug) { |byte_list| 
+                byte_list == list
+            }
         end
         
         # Allows the user to watch an area of memory associated with a previously found match.
